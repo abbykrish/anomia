@@ -1,9 +1,9 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useGameContext } from '@/context/GameContext';
 import { supabase } from '@/lib/supabase';
-import { Player, Game as GameType, Symbol, getTopCard } from '@/types';
-import Card from './Card';
+import { Player, Game as GameType, Symbol, WildCard, getTopCard } from '@/types';
+import Card, { WildCardDisplay } from './Card';
 import PlayerList from './PlayerList';
 
 interface MatchState {
@@ -19,41 +19,97 @@ interface WinClaim {
 
 function Game() {
   const { gameId } = useParams<{ gameId: string }>();
-  const { game, player, players, setGame, setPlayers, updatePlayer } = useGameContext();
+  const { game, player, players, setGame, setPlayer, setPlayers, updatePlayer, getStoredPlayerId } = useGameContext();
   const [drawing, setDrawing] = useState(false);
   const [match, setMatch] = useState<MatchState | null>(null);
   const [winClaim, setWinClaim] = useState<WinClaim | null>(null);
   const [error, setError] = useState('');
+  const [activeWild, setActiveWild] = useState<WildCard | null>(null);
+  const activeWildRef = useRef<WildCard | null>(null);
 
-  // Fetch initial data if not available
+  // Keep ref in sync with state
+  useEffect(() => {
+    activeWildRef.current = activeWild;
+  }, [activeWild]);
+
+  // Fetch initial data on mount
   useEffect(() => {
     if (!gameId) return;
 
     const fetchGameData = async () => {
-      if (!game) {
-        const { data: gameData } = await supabase
-          .from('games')
-          .select('*')
-          .eq('id', gameId)
-          .single();
-        if (gameData) setGame(gameData as GameType);
+      // Always fetch fresh game data
+      const { data: gameData } = await supabase
+        .from('games')
+        .select('*')
+        .eq('id', gameId)
+        .single();
+
+      if (gameData) {
+        setGame(gameData as GameType);
+        setActiveWild(gameData.active_wild as WildCard | null);
       }
 
+      // Fetch all players
       const { data: playersData } = await supabase
         .from('players')
         .select('*')
         .eq('game_id', gameId)
         .order('created_at', { ascending: true });
 
-      if (playersData) setPlayers(playersData as Player[]);
+      if (playersData) {
+        setPlayers(playersData as Player[]);
+
+        // Restore current player from localStorage if not in context
+        const storedPlayerId = getStoredPlayerId();
+        if (storedPlayerId) {
+          const restoredPlayer = playersData.find(p => p.id === storedPlayerId);
+          if (restoredPlayer) {
+            setPlayer(restoredPlayer as Player);
+          }
+        }
+      }
     };
 
     fetchGameData();
-  }, [gameId, game, setGame, setPlayers]);
+  // Only run on mount and gameId change
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId]);
+
+  // Helper to check if two symbols match (considering wild card)
+  const symbolsMatch = useCallback((sym1: Symbol, sym2: Symbol, wild: WildCard | null): boolean => {
+    if (sym1 === sym2) return true;
+    if (wild) {
+      if ((sym1 === wild.symbol1 && sym2 === wild.symbol2) ||
+          (sym1 === wild.symbol2 && sym2 === wild.symbol1)) {
+        return true;
+      }
+    }
+    return false;
+  }, []);
 
   // Subscribe to real-time updates
   useEffect(() => {
     if (!gameId) return;
+
+    // Subscribe to game changes (for active_wild updates)
+    const gameChannel = supabase
+      .channel(`game:${gameId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'games',
+          filter: `id=eq.${gameId}`,
+        },
+        (payload) => {
+          const updatedGame = payload.new as GameType;
+          console.log('Game updated, active_wild:', updatedGame.active_wild);
+          setActiveWild(updatedGame.active_wild);
+          setGame(updatedGame);
+        }
+      )
+      .subscribe();
 
     // Subscribe to player changes
     const playersChannel = supabase
@@ -74,13 +130,18 @@ function Game() {
             // Check for new matches when another player's card changes
             const myTopCard = player ? getTopCard(player) : null;
             const theirTopCard = getTopCard(updatedPlayer);
-            if (player && updatedPlayer.id !== player.id && theirTopCard && myTopCard) {
-              if (theirTopCard.symbol === myTopCard.symbol) {
+            if (player && updatedPlayer.id !== player.id && myTopCard) {
+              // Use ref for current activeWild value
+              const currentWild = activeWildRef.current;
+              if (theirTopCard && symbolsMatch(theirTopCard.symbol, myTopCard.symbol, currentWild)) {
                 setMatch({
                   opponentId: updatedPlayer.id,
                   opponentName: updatedPlayer.name,
                   symbol: theirTopCard.symbol,
                 });
+              } else {
+                // Clear match if we were matching with this player but no longer do
+                setMatch(prev => prev?.opponentId === updatedPlayer.id ? null : prev);
               }
             }
           }
@@ -108,7 +169,7 @@ function Game() {
           loserId: string;
         };
 
-        // Clear match state for both players
+        // Clear match state for both players involved in this win
         if (player && (winnerId === player.id || loserId === player.id)) {
           setMatch(null);
           setWinClaim(null);
@@ -117,10 +178,12 @@ function Game() {
       .subscribe();
 
     return () => {
+      gameChannel.unsubscribe();
       playersChannel.unsubscribe();
       broadcastChannel.unsubscribe();
     };
-  }, [gameId, player, updatePlayer]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gameId, player?.id, updatePlayer, symbolsMatch, setGame]);
 
   const handleDrawCard = useCallback(async () => {
     if (!game || !player || drawing) return;
@@ -141,13 +204,34 @@ function Game() {
         throw new Error(data.error || 'Failed to draw card');
       }
 
-      // Update local player state - add card to top of stack
-      const currentStack = player.card_stack || [];
-      updatePlayer(player.id, { card_stack: [data.card, ...currentStack] });
+      // Check if it was a wild card
+      if (data.wildCard) {
+        // Wild card: update active wild state (card not added to player stack)
+        setActiveWild(data.activeWild);
 
-      // Check for match
-      if (data.match) {
-        setMatch(data.match);
+        // Wild card might trigger a match between existing players
+        if (data.match) {
+          // Wild card match has player1 and player2
+          const isInvolved = data.match.player1Id === player.id || data.match.player2Id === player.id;
+          if (isInvolved) {
+            const opponentId = data.match.player1Id === player.id ? data.match.player2Id : data.match.player1Id;
+            const opponentName = data.match.player1Id === player.id ? data.match.player2Name : data.match.player1Name;
+            setMatch({
+              opponentId,
+              opponentName,
+              symbol: data.match.symbol,
+            });
+          }
+        }
+      } else {
+        // Regular card: add to top of stack
+        const currentStack = player.card_stack || [];
+        updatePlayer(player.id, { card_stack: [data.card, ...currentStack] });
+
+        // Check for match
+        if (data.match) {
+          setMatch(data.match);
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to draw card');
@@ -225,6 +309,14 @@ function Game() {
       </header>
 
       <div className="game-content">
+        {/* Active wild card (visible to all) */}
+        {activeWild && (
+          <section className="active-wild-section">
+            <h3>Active Wild Card</h3>
+            <WildCardDisplay wildCard={activeWild} />
+          </section>
+        )}
+
         {/* Your card section */}
         <section className="your-card-section">
           <h3>Your Card {currentPlayerData && currentPlayerData.card_stack.length > 1 && <span className="stack-count">({currentPlayerData.card_stack.length} cards)</span>}</h3>
@@ -267,9 +359,14 @@ function Game() {
             <p className="match-hint">
               Quick! Name something in their category!
             </p>
-            <button className="btn btn-success btn-large" onClick={handleClaimWin}>
-              I Won!
-            </button>
+            <div className="match-buttons">
+              <button className="btn btn-success btn-large" onClick={handleClaimWin}>
+                I Won!
+              </button>
+              <button className="btn btn-secondary" onClick={() => setMatch(null)}>
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
 

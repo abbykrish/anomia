@@ -8,7 +8,17 @@ type Symbol = typeof SYMBOLS[number];
 interface Card {
   category: string;
   symbol: Symbol;
-  isWild: boolean;
+}
+
+interface WildCard {
+  symbol1: Symbol;
+  symbol2: Symbol;
+}
+
+type DeckItem = Card | WildCard;
+
+function isWildCard(item: DeckItem): item is WildCard {
+  return 'symbol1' in item && 'symbol2' in item;
 }
 
 // Cached Supabase client (reused across requests in same instance)
@@ -43,8 +53,8 @@ function generateGameCode(): string {
   return code;
 }
 
-function generateDeck(categories: string[]): Card[] {
-  const deck: Card[] = [];
+function generateDeck(categories: string[]): DeckItem[] {
+  const deck: DeckItem[] = [];
   const shuffledCategories = shuffleArray([...categories]);
   const WILD_CARD_RATIO = 0.1;
 
@@ -52,14 +62,23 @@ function generateDeck(categories: string[]): Card[] {
     const category = shuffledCategories[i];
     if (!category) continue;
 
-    const isWild = Math.random() < WILD_CARD_RATIO;
-    const symbol = SYMBOLS[i % SYMBOLS.length]!;
+    const shouldBeWild = Math.random() < WILD_CARD_RATIO;
 
-    deck.push({
-      category: isWild ? 'WILD' : category,
-      symbol,
-      isWild,
-    });
+    if (shouldBeWild) {
+      // Wild card: pick two different random symbols
+      const shuffledSymbols = shuffleArray([...SYMBOLS]);
+      deck.push({
+        symbol1: shuffledSymbols[0]!,
+        symbol2: shuffledSymbols[1]!,
+      });
+    } else {
+      // Regular card with category and symbol
+      const symbol = SYMBOLS[i % SYMBOLS.length]!;
+      deck.push({
+        category,
+        symbol,
+      });
+    }
   }
 
   return shuffleArray(deck);
@@ -99,7 +118,7 @@ async function createGame(req: VercelRequest, res: VercelResponse) {
 
   const { data: game, error: gameError } = await supabase
     .from('games')
-    .insert({ code, status: 'waiting', deck, deck_index: 0, wild_equivalence: [] })
+    .insert({ code, status: 'waiting', deck, deck_index: 0, active_wild: null })
     .select()
     .single();
 
@@ -212,10 +231,28 @@ function getTopCard(cardStack: Card[]): Card | null {
   return cardStack.length > 0 ? cardStack[0]! : null;
 }
 
+// Check if two symbols match (either directly or via active wild card)
+function symbolsMatch(sym1: Symbol, sym2: Symbol, activeWild: WildCard | null): boolean {
+  // Direct match
+  if (sym1 === sym2) return true;
+
+  // Wild equivalence match
+  if (activeWild) {
+    if (
+      (sym1 === activeWild.symbol1 && sym2 === activeWild.symbol2) ||
+      (sym1 === activeWild.symbol2 && sym2 === activeWild.symbol1)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // Helper to find matches between players
 function findMatch(
   players: any[],
-  wildEquivalence: [Symbol, Symbol][],
+  activeWild: WildCard | null,
   excludePlayerId?: string
 ): { player1: any; player2: any; symbol: Symbol } | null {
   const playersWithCards = players.filter(p => {
@@ -232,19 +269,8 @@ function findMatch(
 
       if (!card1 || !card2) continue;
 
-      // Direct match
-      if (card1.symbol === card2.symbol) {
+      if (symbolsMatch(card1.symbol, card2.symbol, activeWild)) {
         return { player1: p1, player2: p2, symbol: card1.symbol };
-      }
-
-      // Wild equivalence match
-      for (const [sym1, sym2] of wildEquivalence) {
-        if (
-          (card1.symbol === sym1 && card2.symbol === sym2) ||
-          (card1.symbol === sym2 && card2.symbol === sym1)
-        ) {
-          return { player1: p1, player2: p2, symbol: card1.symbol };
-        }
       }
     }
   }
@@ -273,31 +299,58 @@ async function drawCard(req: VercelRequest, res: VercelResponse) {
   if (!currentPlayer) return res.status(404).json({ error: 'Player not found' });
   if (game.status !== 'playing') return res.status(400).json({ error: 'Game not in progress' });
 
-  const deck = game.deck as Card[];
+  const deck = game.deck as DeckItem[];
   if (game.deck_index >= deck.length) {
     return res.status(400).json({ error: 'No more cards' });
   }
 
-  const card = deck[game.deck_index]!;
-  let wildEquivalence = game.wild_equivalence as [Symbol, Symbol][];
+  const drawnItem = deck[game.deck_index]!;
+  let activeWild = game.active_wild as WildCard | null;
 
-  if (card.isWild) {
-    const otherSymbols = SYMBOLS.filter((s) => s !== card.symbol);
-    const randomSymbol = otherSymbols[Math.floor(Math.random() * otherSymbols.length)]!;
-    wildEquivalence = [...wildEquivalence, [card.symbol, randomSymbol]];
+  // Check if drawn item is a wild card
+  if (isWildCard(drawnItem)) {
+    // Wild card: set as active_wild, don't add to player stack
+    activeWild = drawnItem;
+
+    await supabase.from('games').update({
+      deck_index: game.deck_index + 1,
+      active_wild: activeWild
+    }).eq('id', gameId);
+
+    // Fetch all players to check for any new matches due to wild card
+    const { data: players } = await supabase.from('players').select('*').eq('game_id', gameId);
+
+    let match: { player1Id: string; player1Name: string; player2Id: string; player2Name: string; symbol: Symbol } | undefined;
+
+    if (players) {
+      const foundMatch = findMatch(players, activeWild);
+      if (foundMatch) {
+        match = {
+          player1Id: foundMatch.player1.id,
+          player1Name: foundMatch.player1.name,
+          player2Id: foundMatch.player2.id,
+          player2Name: foundMatch.player2.name,
+          symbol: foundMatch.symbol,
+        };
+      }
+    }
+
+    return res.json({
+      wildCard: drawnItem,
+      activeWild,
+      match,
+    });
   }
 
-  // Push new card to TOP of stack (index 0)
+  // Regular card: add to player stack
+  const card = drawnItem as Card;
   const currentStack = (currentPlayer.card_stack as Card[]) || [];
   const newStack = [card, ...currentStack];
 
   // Update player stack and game state in parallel
   await Promise.all([
     supabase.from('players').update({ card_stack: newStack }).eq('id', playerId),
-    supabase.from('games').update({
-      deck_index: game.deck_index + 1,
-      wild_equivalence: wildEquivalence
-    }).eq('id', gameId),
+    supabase.from('games').update({ deck_index: game.deck_index + 1 }).eq('id', gameId),
   ]);
 
   // Fetch all players to check for matches
@@ -315,25 +368,14 @@ async function drawCard(req: VercelRequest, res: VercelResponse) {
       const opponentCard = getTopCard(opponent.card_stack as Card[] || []);
       if (!opponentCard) continue;
 
-      if (card.symbol === opponentCard.symbol) {
+      if (symbolsMatch(card.symbol, opponentCard.symbol, activeWild)) {
         match = { opponentId: opponent.id, opponentName: opponent.name, symbol: card.symbol };
         break;
       }
-
-      for (const [sym1, sym2] of wildEquivalence) {
-        if (
-          (card.symbol === sym1 && opponentCard.symbol === sym2) ||
-          (card.symbol === sym2 && opponentCard.symbol === sym1)
-        ) {
-          match = { opponentId: opponent.id, opponentName: opponent.name, symbol: card.symbol };
-          break;
-        }
-      }
-      if (match) break;
     }
   }
 
-  return res.json({ card, match, wildEquivalence: card.isWild ? wildEquivalence : undefined });
+  return res.json({ card, match });
 }
 
 async function claimWin(req: VercelRequest, res: VercelResponse) {
@@ -380,7 +422,7 @@ async function claimWin(req: VercelRequest, res: VercelResponse) {
 
   const revealedCard = getTopCard(newLoserStack);
   if (revealedCard) {
-    const wildEquivalence = game.wild_equivalence as [Symbol, Symbol][];
+    const activeWild = game.active_wild as WildCard | null;
 
     // Check against all other players (including winner)
     for (const opponent of players.filter(p => p.id !== loserId)) {
@@ -388,21 +430,7 @@ async function claimWin(req: VercelRequest, res: VercelResponse) {
       const opponentCard = getTopCard(opponentStack);
       if (!opponentCard) continue;
 
-      let isMatch = revealedCard.symbol === opponentCard.symbol;
-
-      if (!isMatch) {
-        for (const [sym1, sym2] of wildEquivalence) {
-          if (
-            (revealedCard.symbol === sym1 && opponentCard.symbol === sym2) ||
-            (revealedCard.symbol === sym2 && opponentCard.symbol === sym1)
-          ) {
-            isMatch = true;
-            break;
-          }
-        }
-      }
-
-      if (isMatch) {
+      if (symbolsMatch(revealedCard.symbol, opponentCard.symbol, activeWild)) {
         cascadingMatch = {
           player1Id: loserId,
           player1Name: loser.name,

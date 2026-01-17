@@ -13,7 +13,7 @@ CREATE TABLE games (
   host_id UUID, -- Will be set after first player joins
   deck JSONB NOT NULL DEFAULT '[]',
   deck_index INTEGER NOT NULL DEFAULT 0,
-  wild_equivalence JSONB NOT NULL DEFAULT '[]',
+  active_wild JSONB DEFAULT NULL,  -- Current active wild card: {symbol1, symbol2} or null
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 

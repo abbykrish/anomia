@@ -115,9 +115,9 @@ export interface DbGame {
   code: string;
   status: GameStatus;
   host_id: string;
-  deck: Card[];
+  deck: (Card | WildCard)[];
   deck_index: number;
-  wild_equivalence: [Symbol, Symbol][];
+  active_wild: WildCard | null;
   created_at: string;
 }
 
