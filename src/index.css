@@ -122,6 +122,22 @@ body {
   font-weight: 700;
 }
 
+.btn-copy {
+  background: var(--surface);
+  color: var(--primary);
+  border: 2px solid var(--primary);
+  padding: 0.625rem 1.25rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border-radius: 8px;
+  margin-top: 0.75rem;
+}
+
+.btn-copy:hover {
+  background: var(--primary);
+  color: white;
+}
+
 /* Inputs */
 .input {
   width: 100%;

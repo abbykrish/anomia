@@ -1,15 +1,24 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useGameContext } from '@/context/GameContext';
 
 function Home() {
   const navigate = useNavigate();
+  const { code: codeParam } = useParams<{ code?: string }>();
   const { setGame, setPlayer } = useGameContext();
   const [mode, setMode] = useState<'menu' | 'create' | 'join'>('menu');
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // If we have a code param from /join/:code, auto-switch to join mode
+  useEffect(() => {
+    if (codeParam) {
+      setMode('join');
+      setCode(codeParam.toUpperCase());
+    }
+  }, [codeParam]);
 
   const handleCreate = async () => {
     if (!name.trim()) {

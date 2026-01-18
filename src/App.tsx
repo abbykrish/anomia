@@ -10,6 +10,7 @@ function App() {
       <div className="app">
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/join/:code" element={<Home />} />
           <Route path="/lobby/:gameId" element={<Lobby />} />
           <Route path="/game/:gameId" element={<Game />} />
         </Routes>

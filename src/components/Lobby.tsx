@@ -10,6 +10,19 @@ function Lobby() {
   const { game, player, players, setGame, setPlayers } = useGameContext();
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyLink = async () => {
+    if (!game) return;
+    const joinUrl = `${window.location.origin}/join/${game.code}`;
+    try {
+      await navigator.clipboard.writeText(joinUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error('Failed to copy:', err);
+    }
+  };
 
   // Fetch initial players and subscribe to changes
   useEffect(() => {
@@ -128,7 +141,9 @@ function Lobby() {
       <div className="game-code">
         <p>Game Code</p>
         <h2>{game.code}</h2>
-        <p className="hint">Share this code with friends</p>
+        <button className="btn btn-copy" onClick={handleCopyLink}>
+          {copied ? 'Copied!' : 'Copy Link'}
+        </button>
       </div>
 
       <div className="players-list">
