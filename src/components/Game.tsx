@@ -149,9 +149,25 @@ function Game() {
       )
       .subscribe();
 
-    // Subscribe to broadcast events (win claims)
+    // Subscribe to broadcast events (matches, win claims)
     const broadcastChannel = supabase
       .channel(`game-events:${gameId}`)
+      .on('broadcast', { event: 'match' }, (payload) => {
+        const { player1Id, player1Name, player2Id, player2Name, symbol } = payload.payload as {
+          player1Id: string;
+          player1Name: string;
+          player2Id: string;
+          player2Name: string;
+          symbol: Symbol;
+        };
+
+        // Check if current player is involved in the match
+        if (player && (player1Id === player.id || player2Id === player.id)) {
+          const opponentId = player1Id === player.id ? player2Id : player1Id;
+          const opponentName = player1Id === player.id ? player2Name : player1Name;
+          setMatch({ opponentId, opponentName, symbol });
+        }
+      })
       .on('broadcast', { event: 'win_claim' }, (payload) => {
         const { claimerId, claimerName, opponentId } = payload.payload as {
           claimerId: string;
@@ -202,6 +218,12 @@ function Game() {
 
       if (!response.ok) {
         throw new Error(data.error || 'Failed to draw card');
+      }
+
+      // Check if game is over (no more cards)
+      if (data.gameOver) {
+        // Game ended - players will be updated via subscription
+        return;
       }
 
       // Check if it was a wild card
@@ -293,19 +315,93 @@ function Game() {
     setMatch(null);
   }, [game, player, winClaim, gameId]);
 
+  const handleEndGame = useCallback(async () => {
+    if (!game || !player || player.id !== game.host_id) return;
+
+    try {
+      const response = await fetch('/api/end-game', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameId: game.id, playerId: player.id }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to end game');
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to end game');
+    }
+  }, [game, player]);
+
   if (!game || !player) {
     return <div className="game-loading">Loading...</div>;
+  }
+
+  // Game Over screen
+  if (game.status === 'finished') {
+    const sortedPlayers = [...players].sort((a, b) => b.score - a.score);
+    const winner = sortedPlayers[0];
+
+    return (
+      <div className="game">
+        <header className="game-header">
+          <span className="game-code">Code: {game.code}</span>
+          <span className="player-name">{player.name}</span>
+        </header>
+
+        <div className="game-over">
+          <h1>Game Over!</h1>
+
+          {winner && (
+            <div className="winner-announcement">
+              <h2>{winner.name} wins!</h2>
+              <p className="winner-score">{winner.score} points</p>
+            </div>
+          )}
+
+          <div className="final-scores">
+            <h3>Final Scores</h3>
+            <ol className="scores-list">
+              {sortedPlayers.map((p, index) => (
+                <li key={p.id} className={p.id === player.id ? 'is-current' : ''}>
+                  <span className="rank">{index + 1}.</span>
+                  <span className="name">{p.name}{p.id === player.id && ' (You)'}</span>
+                  <span className="score">{p.score} pts</span>
+                </li>
+              ))}
+            </ol>
+          </div>
+
+          <button
+            className="btn btn-primary btn-large"
+            onClick={() => window.location.href = '/'}
+          >
+            Play Again
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const currentPlayerData = players.find((p) => p.id === player.id);
   const topCard = currentPlayerData ? getTopCard(currentPlayerData) : null;
   const hasCard = topCard !== null;
 
+  const isHost = player.id === game.host_id;
+
   return (
     <div className="game">
       <header className="game-header">
         <span className="game-code">Code: {game.code}</span>
-        <span className="player-name">{player.name}</span>
+        <div className="header-right">
+          {isHost && (
+            <button className="btn-end-game" onClick={handleEndGame}>
+              End Game
+            </button>
+          )}
+          <span className="player-name">{player.name}</span>
+        </div>
       </header>
 
       <div className="game-content">

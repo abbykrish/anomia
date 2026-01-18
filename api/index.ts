@@ -301,7 +301,21 @@ async function drawCard(req: VercelRequest, res: VercelResponse) {
 
   const deck = game.deck as DeckItem[];
   if (game.deck_index >= deck.length) {
-    return res.status(400).json({ error: 'No more cards' });
+    // No more cards - end the game
+    await supabase.from('games').update({ status: 'finished' }).eq('id', gameId);
+
+    // Get final scores
+    const { data: players } = await supabase
+      .from('players')
+      .select('*')
+      .eq('game_id', gameId)
+      .order('score', { ascending: false });
+
+    return res.json({
+      gameOver: true,
+      message: 'No more cards - game over!',
+      players: players || []
+    });
   }
 
   const drawnItem = deck[game.deck_index]!;
@@ -332,6 +346,14 @@ async function drawCard(req: VercelRequest, res: VercelResponse) {
           player2Name: foundMatch.player2.name,
           symbol: foundMatch.symbol,
         };
+
+        // Broadcast match to both players
+        const channel = supabase.channel(`game-events:${gameId}`);
+        await channel.send({
+          type: 'broadcast',
+          event: 'match',
+          payload: match,
+        });
       }
     }
 
@@ -370,6 +392,21 @@ async function drawCard(req: VercelRequest, res: VercelResponse) {
 
       if (symbolsMatch(card.symbol, opponentCard.symbol, activeWild)) {
         match = { opponentId: opponent.id, opponentName: opponent.name, symbol: card.symbol };
+
+        // Broadcast match to both players
+        const channel = supabase.channel(`game-events:${gameId}`);
+        await channel.send({
+          type: 'broadcast',
+          event: 'match',
+          payload: {
+            player1Id: playerId,
+            player1Name: currentPlayer.name,
+            player2Id: opponent.id,
+            player2Name: opponent.name,
+            symbol: card.symbol,
+          },
+        });
+
         break;
       }
     }
@@ -438,6 +475,15 @@ async function claimWin(req: VercelRequest, res: VercelResponse) {
           player2Name: opponent.name,
           symbol: revealedCard.symbol,
         };
+
+        // Broadcast cascading match to both players
+        const channel = supabase.channel(`game-events:${gameId}`);
+        await channel.send({
+          type: 'broadcast',
+          event: 'match',
+          payload: cascadingMatch,
+        });
+
         break;
       }
     }

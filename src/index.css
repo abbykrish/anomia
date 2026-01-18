@@ -365,7 +365,7 @@ body {
 }
 
 .card-category {
-  font-size: 1.25rem;
+  font-size: 2rem;
   font-weight: 600;
   color: var(--text);
 }
@@ -458,6 +458,113 @@ body {
 
 .game-header .player-name {
   color: white;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.btn-end-game {
+  background: rgba(255, 255, 255, 0.2);
+  color: white;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.btn-end-game:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Game Over Screen */
+.game-over {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  text-align: center;
+}
+
+.game-over h1 {
+  font-size: 2.5rem;
+  color: var(--primary);
+  margin-bottom: 1.5rem;
+}
+
+.winner-announcement {
+  background: var(--primary);
+  color: white;
+  padding: 1.5rem 2.5rem;
+  border-radius: 16px;
+  margin-bottom: 2rem;
+}
+
+.winner-announcement h2 {
+  font-size: 1.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.winner-score {
+  font-size: 1.25rem;
+  opacity: 0.9;
+}
+
+.final-scores {
+  width: 100%;
+  max-width: 400px;
+  margin-bottom: 2rem;
+}
+
+.final-scores h3 {
+  font-size: 1rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  margin-bottom: 1rem;
+}
+
+.scores-list {
+  list-style: none;
+  padding: 0;
+}
+
+.scores-list li {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+  background: var(--surface);
+  border: 2px solid var(--border);
+  border-radius: 12px;
+  margin-bottom: 0.5rem;
+}
+
+.scores-list li.is-current {
+  border-color: var(--primary);
+  background: rgba(99, 102, 241, 0.05);
+}
+
+.scores-list .rank {
+  font-weight: 700;
+  color: var(--text-muted);
+  width: 2rem;
+}
+
+.scores-list .name {
+  flex: 1;
+  font-weight: 500;
+}
+
+.scores-list .score {
+  font-weight: 700;
+  color: var(--primary);
 }
 
 .game-code {
@@ -747,7 +854,7 @@ body {
   }
 
   .card-category {
-    font-size: 1.5rem;
+    font-size: 2rem;
   }
 
   .wild-symbols .card-symbol {
