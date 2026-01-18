@@ -9,8 +9,11 @@ function Home() {
   const [mode, setMode] = useState<'menu' | 'create' | 'join'>('menu');
   const [name, setName] = useState('');
   const [code, setCode] = useState('');
+  const [cardCount, setCardCount] = useState<number>(40);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  const cardCountOptions = [20, 40, 60, 80, 100, 0]; // 0 means all cards
 
   // If we have a code param from /join/:code, auto-switch to join mode
   useEffect(() => {
@@ -33,7 +36,7 @@ function Home() {
       const response = await fetch('/api/create-game', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostName: name.trim() }),
+        body: JSON.stringify({ hostName: name.trim(), cardCount: cardCount || undefined }),
       });
 
       const data = await response.json();
@@ -121,6 +124,24 @@ function Home() {
           className="input"
           maxLength={20}
         />
+
+        {mode === 'create' && (
+          <div className="card-count-selector">
+            <label>Number of cards</label>
+            <div className="card-count-options">
+              {cardCountOptions.map((count) => (
+                <button
+                  key={count}
+                  type="button"
+                  className={`card-count-btn ${cardCount === count ? 'active' : ''}`}
+                  onClick={() => setCardCount(count)}
+                >
+                  {count === 0 ? 'All' : count}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {mode === 'join' && (
           <input

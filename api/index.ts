@@ -86,7 +86,7 @@ function generateDeck(categories: string[]): DeckItem[] {
 
 // Route handlers
 async function createGame(req: VercelRequest, res: VercelResponse) {
-  const { hostName } = req.body;
+  const { hostName, cardCount } = req.body;
   if (!hostName?.trim()) {
     return res.status(400).json({ error: 'Host name is required' });
   }
@@ -114,7 +114,12 @@ async function createGame(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Failed to load categories' });
   }
 
-  const deck = generateDeck(categories.map((c: { text: string }) => c.text));
+  let deck = generateDeck(categories.map((c: { text: string }) => c.text));
+
+  // Limit deck size if cardCount specified
+  if (cardCount && cardCount > 0 && cardCount < deck.length) {
+    deck = deck.slice(0, cardCount);
+  }
 
   const { data: game, error: gameError } = await supabase
     .from('games')

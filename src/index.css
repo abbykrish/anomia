@@ -217,6 +217,46 @@ body {
   margin-top: 2rem;
 }
 
+.card-count-selector {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.card-count-selector label {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.card-count-options {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.card-count-btn {
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+  border: 2px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.card-count-btn:hover {
+  border-color: var(--primary);
+}
+
+.card-count-btn.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: white;
+}
+
 .error {
   color: var(--danger);
   font-size: 0.875rem;
